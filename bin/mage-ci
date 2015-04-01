@@ -41,35 +41,60 @@ then
     echo "$REALPATH"
   }
 fi
+absolutepath() {
+  local OURPWD="$(pwd)"
+  cd "$(dirname "${1}")"
+  local RESULT="$(pwd)/$(basename "${1}")"
+  cd "${OURPWD}"
+  echo "${RESULT}"
+}
 if hash realpath 2>/dev/null; then
-  script_bin=$(realpath $0)
+  script_bin=$(realpath "${0}")
+elif hash readlink 2>/dev/null; then
+  script_bin=$(readlink -f "${0}")
+elif [ "${0:0:1}" = "/" ]; then
+  script_bin=${0}
 else
-  script_bin=$(readlink -f $0)
+  script_bin=$(absolutepath "${0}")
 fi
-script=$(basename $script_bin)
-script_dir=$(dirname $script_bin)
+if [ ! "${script_bin:0:1}" = "/" ]; then
+  echo "can not resolve absolute path of script. system seems incompatible."
+  exit 1
+fi
+script=$(basename "${script_bin}")
+script_dir=$(dirname "${script_bin}")
 action=$1
 shift;
 
-MAGECI_TMP=$(dirname $script_dir)/.tmp
+MAGECI_TMP=$(dirname "${script_dir}")/.tmp
 
-if [ -e $HOME/.mageci.conf ]
+if [ -e "${HOME}/.mageci.conf" ]
 then
-	. $HOME/.mageci.conf
+  . "${HOME}/.mageci.conf"
 fi
 
-if [ -e $PWD/.mageci.conf ]
+if [ -e "${PWD}/.mageci.conf" ]
 then
-   . $PWD/.mageci.conf
+  . "${PWD}/.mageci.conf"
 fi
 
-MAGECIF=(
+if hash tput 2>/dev/null; then
+  MAGECIF=(
    $(tput sgr0) # Reset char
    $(tput setaf 2) # Success Message
    $(tput setaf 3) # Info Message
    $(tput setaf 5) # Error Message
    $(tput bold) # Important text
-)
+  )
+else
+  MAGECIF=(
+   $(echo -e "\e[0m") # Reset char
+   $(echo -e "\e[32m") # Success Message
+   $(echo -e "\e[33m") # Info Message
+   $(echo -e "\e[35m") # Error Message
+   $(echo -e "\e[1m") # Important text
+  )
+fi
 print_usage ()
 {
 echo "
@@ -140,14 +165,14 @@ run_shell ()
    shift 2;
 
    # Check that first parameter is directory
-   if [ ! -d "$magento_dir/shell" ]
+   if [ ! -d "${magento_dir}/shell" ]
    then
-      echo "${MAGECIF[3]}Magento shell directory is not found at $magento_dir/shell ${MAGECIF[0]}"
+      echo "${MAGECIF[3]}Magento shell directory is not found at ${magento_dir}/shell ${MAGECIF[0]}"
       exit 1
    fi
 
-   cd $magento_dir/shell
-   $php_bin -f $script_name -- ${@}
+   cd "${magento_dir}/shell"
+   "${php_bin}" -f "${script_name}" -- ${@}
    check_error_exit
 }
 
@@ -189,12 +214,14 @@ run_phpunit ()
    fi
 
    if hash realpath 2>/dev/null; then
-     test_dir=$(realpath $test_dir)
+     test_dir=$(realpath "${test_dir}")
+   elif hash readlink 2>/dev/null; then
+     test_dir=$(readlink -f "${test_dir}")
    else
-     test_dir=$(readlink -f $test_dir)
+     test_dir=$(absolutepath "${test_dir}")
    fi
    
-   cd $test_dir
+   cd "${test_dir}"
 
    local exitCode=1
 
@@ -209,7 +236,7 @@ run_phpunit ()
       do
          if [  -f  "$dir/phpunit.xml" -o -f "$dir/phpunit.xml.dist"  ]
          then
-            cd $dir;
+            cd "${dir}";
             echo "${MAGECIF[2]}Running test in $dir...${MAGECIF[0]}"
             $phpunit_bin ${@}
             check_error_exit
@@ -241,7 +268,7 @@ dump_magento ()
 
    for arg
    do
-     if [[ $arg =~ ^[0-9.]+$ ]]
+     if echo "${arg}" | grep -E '^[0-9.]+$' > /dev/null
      then
        version+=" $arg"
      else
@@ -295,7 +322,7 @@ install_multiple_magento ()
 
    for arg
    do
-     if [[ $arg =~ ^[0-9.]+$ ]]
+     if echo "${arg}" | grep -E '^[0-9.]+$' > /dev/null
      then
        version+=" $arg"
      else
@@ -323,12 +350,12 @@ install_multiple_magento ()
       # Running as subprocess to not break all version installs
       db_name="${prefix}_${ver//./_}"
       echo "${MAGECIF[2]}Installing magento version $ver into $magento_dir/${prefix}-${ver} directory and $db_name mysql DB${MAGECIF[0]}"
-      $script_bin install $magento_dir/${prefix}-${ver} $ver $db_name $pass_options > /dev/null 2>&1
+      "${script_bin}" install "${magento_dir}/${prefix}-${ver}" $ver $db_name $pass_options > /dev/null 2>&1
       if [ $? -ne 0 ]
       then 
         echo "${MAGECIF[3]}Failed to install $magento_dir/$prefix-$ver... Skipping${MAGECIF[0]}"
       else
-	echo "${MAGECIF[1]}Installed...${MAGECIF[0]}"
+        echo "${MAGECIF[1]}Installed...${MAGECIF[0]}"
       fi
    done
 }
@@ -338,7 +365,7 @@ install_magento ()
    local magento_dir=$1; local version=$2; local db_name=$3; shift 3
    local db_create; local db_user="root"; local db_pass=""; local sql_dump_file=""; local include_test_db
    local phpunit_local_xml; local opt; local sql_base_url; local db_cred
-   local base_url="http://magento.local/"; local download_dir=$MAGECI_TMP;
+   local base_url="http://magento.local/"; local download_dir="${MAGECI_TMP}";
    local admin_password="123123test"; local clean_up=0; local no_download="0";
 
    while getopts :u:r:p:f:b:d:a:cton opt
@@ -362,34 +389,34 @@ install_magento ()
 
    [[ $db_pass == "" ]] && db_cred="-u $db_user" || db_cred="-u $db_user -p$db_pass"
 
-   if [[ $magento_dir == "" ]]
+   if [[ "${magento_dir}" == "" ]]
    then
       echo "${MAGECIF[3]}Magento directory should be specified${MAGECIF[0]}"
       print_usage;
       exit 1
    fi
 
-   if [ ! -d "$magento_dir" ]
+   if [ ! -d "${magento_dir}" ]
    then
       echo "${MAGECIF[2]}Creating Magento directory: $magento_dir ...${MAGECIF[0]}"
-      mkdir -p "$magento_dir"
+      mkdir -p "${magento_dir}"
    fi
  
-   if [[ ! $version =~ ^[a-z0-9.\-]+$ ]]
+   if ! echo "${version}" | grep -E '^[a-z0-9.\-]+$' > /dev/null
    then 
       echo "${MAGECIF[3]}Version should be specified: $version${MAGECIF[0]}"
       exit 1
    fi 
 
-   if [[ $db_name == "" ]]
+   if [[ "${db_name}" == "" ]]
    then 
       echo "${MAGECIF[3]}<db_name> is required${MAGECIF[0]}"
       exit 1
    fi
 
-   if [ ! -d "$download_dir" ]
+   if [ ! -d "${download_dir}" ]
    then
-     mkdir -p $download_dir
+     mkdir -p "${download_dir}"
      check_error_exit
    fi
 
@@ -406,14 +433,14 @@ install_magento ()
         check_error_exit
       fi
 
-      if [[ $sql_base_url =~ ^https?\:// ]]
+      if echo "${sql_base_url}" | grep -E '^https?\://' > /dev/null
       then
         echo "${MAGECIF[2]}Trying download SQL dump from url: $sql_base_url/$version.sql.gz"
-        wget -q --no-clobber -P $download_dir $sql_base_url/$version.sql.gz
+        wget -q --no-clobber -P "${download_dir}" "${sql_base_url}/${version}.sql.gz"
         if [ $? -eq 0 ]
         then
           echo "Dump is downloaded and will be used for installation${MAGECIF[0]}"
-          sql_dump_file="$download_dir/$version.sql.gz"
+          sql_dump_file="${download_dir}/${version}.sql.gz"
         else
           echo "Dump is not available...${MAGECIF[0]}"
         fi
@@ -422,14 +449,14 @@ install_magento ()
 
       if [ -f "${sql_dump_file}" ]
       then 
-        if [[ $sql_dump_file =~ \.gz$ ]] 
+        if echo "${sql_dump_file}" | grep -E '\.gz$' > /dev/null
 	    then
            echo "${MAGECIF[2]}Uncompressing dump file...${MAGECIF[0]}"
-           mkdir -p $download_dir/dump
-           local dest_file=$(basename $sql_dump_file)
-           cp $sql_dump_file $download_dir/dump/$dest_file
-           gzip -f -d $download_dir/dump/$dest_file
-           sql_dump_file="$download_dir/dump/${dest_file/.gz/}"
+           mkdir -p "${download_dir}/dump"
+           local dest_file=$(basename "${sql_dump_file}")
+           cp "${sql_dump_file}" "${download_dir}/dump/${dest_file}"
+           gzip -f -d "${download_dir}/dump/${dest_file}"
+           sql_dump_file="${download_dir}/dump/${dest_file/.gz/}"
         fi
         
         echo "${MAGECIF[2]}Loading db dump into ${db_name} database...${MAGECIF[0]}"
@@ -446,28 +473,28 @@ install_magento ()
 
    if [[ $clean_up == "1" ]]
    then
-      uninstall_magento $magento_dir
+      uninstall_magento "${magento_dir}"
    fi
 
    if [[ $no_download == "0" ]] 
    then
        echo "${MAGECIF[2]}Downloading Magento from URL: http://www.magentocommerce.com/downloads/assets/$version/magento-$version.tar.gz${MAGECIF[0]}"
-       wget -q --no-clobber -P $download_dir http://www.magentocommerce.com/downloads/assets/$version/magento-$version.tar.gz
+       wget -q --no-clobber -P "${download_dir}" http://www.magentocommerce.com/downloads/assets/$version/magento-$version.tar.gz
        check_error_exit;
        echo "${MAGECIF[2]}Unpacking magento installment...${MAGECIF[0]}"
-       tar -zxf $download_dir/magento-$version.tar.gz -C $magento_dir --strip=1 magento
+       tar -zxf "${download_dir}/magento-$version.tar.gz" -C "${magento_dir}" --strip=1 magento
        # Special case for PHP5.4 with installation process
        echo "${MAGECIF[2]}Applying pdo_mysql check fix...${MAGECIF[0]}"
        config_file="${magento_dir}/app/code/core/Mage/Install/etc/config.xml"
        config_file_tmp="${config_file}.tmp"
-       cp $config_file $config_file_tmp
-       sed 's/<pdo_mysql\/>/<pdo_mysql>1<\/pdo_mysql>/' $config_file_tmp > $config_file
+       cp "${config_file}" "${config_file_tmp}"
+       sed 's/<pdo_mysql\/>/<pdo_mysql>1<\/pdo_mysql>/' "${config_file_tmp}" > "${config_file}"
    fi
 
    echo "${MAGECIF[2]}Installing Magento...${MAGECIF[0]}"
-   cd $magento_dir
-   $php_bin -f install.php -- --license_agreement_accepted yes \
-  	  --locale en_US --timezone "America/Los_Angeles" --default_currency USD \
+   cd "${magento_dir}"
+   "${php_bin}" -f install.php -- --license_agreement_accepted yes \
+          --locale en_US --timezone "America/Los_Angeles" --default_currency USD \
           --db_host localhost --db_name "$db_name" --db_user "$db_user" --db_pass "$db_pass" \
           --url "$base_url" --use_rewrites yes \
           --use_secure no --secure_base_url "$base_url" --use_secure_admin no \
@@ -526,36 +553,36 @@ install_module () {
    local modman="${script_dir}/modman"
    local modman_args="$@"
 
-   init_modman $magento_dir
+   init_modman "${magento_dir}"
 
-   if [[ $magento_module_source =~ ^git@ || $magento_module_source =~ \.git$ ]]
+   if echo "${magento_module_source}" | grep -E '^git@|\.git$' > /dev/null
    then
-     magento_module=$(basename ${magento_module_source/.git//})
+     magento_module=$(basename "${magento_module_source/.git//}")
      check_error_exit
    elif [ -d "${magento_module_source}" ]
    then
-     magento_module=$(basename ${magento_module_source})
+     magento_module=$(basename "${magento_module_source}")
    else
-     echo "${MAGECIF[3]}Unkown source type${MAGECIF[0]}"
+     echo "${MAGECIF[3]}Unkown source type '${magento_module_source}'${MAGECIF[0]}"
      print_usage;
      exit 1
    fi
 
    if [ ! -d ".modman/${magento_module}" ]
    then
-     if [[ $magento_module_source =~ ^git@ || $magento_module_source =~ \.git$ ]]
+     if echo "${magento_module_source}" | grep -E '^git@|\.git$' > /dev/null
         then
         echo "${MAGECIF[2]}Installing module from git repository: $magento_module_source${MAGECIF[0]}"
-        $modman clone $magento_module_source $modman_args
+        "${modman}" clone "${magento_module_source}" $modman_args
         check_error_exit
      elif [ -d "$magento_module_source" ]
      then
         echo "${MAGECIF[2]}Installing module from local directory: $magento_module_source${MAGECIF[0]}"
-        $modman link $magento_module_source $modman_args
+        "${modman}" link "${magento_module_source}" $modman_args
         check_error_exit
      fi
    else
-      $modman update $magento_module
+      "${modman}" update $magento_module
       echo "${MAGECIF[2]}Updating module${MAGECIF[0]}"
    fi
 
@@ -568,7 +595,7 @@ init_modman () {
    local magento_dir=$1
    local modman="${script_dir}/modman"
 
-   if [ ! -f "$modman" ]
+   if [ ! -f "${modman}" ]
    then
      echo "${MAGECIF[2]}Installing modman...${MAGECIF[0]}"
      curl -s -o "$modman" https://raw.githubusercontent.com/colinmollenhour/modman/master/modman
@@ -577,13 +604,13 @@ init_modman () {
      check_error_exit
    fi
 
-   cd $magento_dir
+   cd "${magento_dir}"
    check_error_exit
 
    if [ ! -d ".modman" ]
    then
      echo "${MAGECIF[2]}Initializing modman...${MAGECIF[0]}"
-     $modman init
+     "${modman}" init
    fi
 }
 
@@ -591,9 +618,9 @@ update_modules () {
    local magento_dir=$1
    local modman="${script_dir}/modman"
 
-   init_modman $magento_dir
-   $modman update-all
-   $modman deploy-all
+   init_modman "${magento_dir}"
+   "${modman}" update-all
+   "${modman}" deploy-all
    echo "${MAGECIF[1]}Modules updated${MAGECIF[0]}"
 }
 
@@ -614,7 +641,7 @@ uninstall_magento () {
    [[ $db_pass == "" ]] && db_cred="-u $db_user" || db_cred="-u $db_user -p$db_pass"
 
    echo "${MAGECIF[2]}Cleaning up Magento directory...${MAGECIF[0]}"
-   rm -rf $magento_dir/* $magento_dir/.ht*
+   rm -rf "${magento_dir}/*" "${magento_dir}/.ht*"
 
    if [[ $db_name != "" ]]
    then
@@ -623,7 +650,7 @@ uninstall_magento () {
         check_error_exit
    fi;
 
-   echo "${MAGECIF[1]}Magento was uninstalled at: $magento_dir"
+   echo "${MAGECIF[1]}Magento was uninstalled at: ${magento_dir}"
 }
 
 uninstall_module () {
@@ -632,15 +659,15 @@ uninstall_module () {
    local magento_module
    local modman="${script_dir}/modman"
 
-   init_modman $magento_dir
+   init_modman "${magento_dir}"
 
-   if [[ $magento_module_source =~ ^git@ || $magento_module_source =~ \.git$ ]]
+   if echo "${magento_module_source}" | grep -E '^git@|\.git$' > /dev/null
    then
-     magento_module=$(basename ${magento_module_source/.git//})
+     magento_module=$(basename "${magento_module_source/.git//}")
      check_error_exit
    elif [ -d "${magento_module_source}" ]
    then
-     magento_module=$(basename ${magento_module_source})
+     magento_module=$(basename "${magento_module_source}")
    elif [ -d ".modman/$magento_module_source" ]
    then
      magento_module=$magento_module_source
@@ -653,7 +680,7 @@ uninstall_module () {
    if [ -d ".modman/$magento_module" ]
    then
       echo "${MAGECIF[2]}Removing $magento_module module${MAGECIF[0]}"
-      $modman remove $magento_module
+      "${modman}" remove $magento_module
       echo "${MAGECIF[1]}$magento_module module was removed${MAGECIF[0]}"
    else
       echo "${MAGECIF[2]}$magento_module module is already removed${MAGECIF[0]}"
